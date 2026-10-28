@@ -1,0 +1,665 @@
+name: Build Shake Torch APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Write project files
+        run: |
+          mkdir -p "$(dirname 'settings.gradle')"
+          cat > 'settings.gradle' <<'EOF_SHAKE'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "ShakeTorch"
+          include ':app'
+          EOF_SHAKE
+          mkdir -p "$(dirname 'build.gradle')"
+          cat > 'build.gradle' <<'EOF_SHAKE'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF_SHAKE
+          mkdir -p "$(dirname 'gradle.properties')"
+          cat > 'gradle.properties' <<'EOF_SHAKE'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=false
+          android.nonTransitiveRClass=true
+          EOF_SHAKE
+          mkdir -p "$(dirname 'app/build.gradle')"
+          cat > 'app/build.gradle' <<'EOF_SHAKE'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.venkat.shaketorch'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.venkat.shaketorch'
+                  minSdk 26
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0'
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+
+          // No external libraries: plain Android framework only, so the APK stays tiny.
+          EOF_SHAKE
+          mkdir -p "$(dirname 'app/src/main/AndroidManifest.xml')"
+          cat > 'app/src/main/AndroidManifest.xml' <<'EOF_SHAKE'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <!-- Torch control through CameraManager.setTorchMode needs no CAMERA permission. -->
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+              <uses-feature android:name="android.hardware.camera.flash" android:required="true" />
+              <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="true" />
+
+              <application
+                  android:label="@string/app_name"
+                  android:icon="@drawable/ic_launcher"
+                  android:roundIcon="@drawable/ic_launcher"
+                  android:theme="@android:style/Theme.DeviceDefault.Light"
+                  android:allowBackup="false">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".ShakeService"
+                      android:exported="false"
+                      android:foregroundServiceType="specialUse">
+                      <property
+                          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                          android:value="Listens for a shake gesture to toggle the flashlight" />
+                  </service>
+
+                  <receiver
+                      android:name=".BootReceiver"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                      </intent-filter>
+                  </receiver>
+              </application>
+          </manifest>
+          EOF_SHAKE
+          mkdir -p "$(dirname 'app/src/main/res/values/strings.xml')"
+          cat > 'app/src/main/res/values/strings.xml' <<'EOF_SHAKE'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">Shake Torch</string>
+          </resources>
+          EOF_SHAKE
+          mkdir -p "$(dirname 'app/src/main/res/drawable/ic_launcher.xml')"
+          cat > 'app/src/main/res/drawable/ic_launcher.xml' <<'EOF_SHAKE'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#1F2933" android:pathData="M54,4a50,50 0,1 1,0 100a50,50 0,1 1,0 -100z" />
+              <!-- light beam -->
+              <path android:fillColor="#FFE27A" android:pathData="M36,22L72,22L64,40L44,40Z" />
+              <!-- torch body -->
+              <path android:fillColor="#F5F7FA" android:pathData="M44,42L64,42L64,48L60,56L60,84Q60,88 56,88L52,88Q48,88 48,84L48,56L44,48Z" />
+              <path android:fillColor="#1F2933" android:pathData="M51,62L57,62L57,70L51,70Z" />
+          </vector>
+          EOF_SHAKE
+          mkdir -p "$(dirname 'app/src/main/res/drawable/ic_notif.xml')"
+          cat > 'app/src/main/res/drawable/ic_notif.xml' <<'EOF_SHAKE'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M6,2h12v4l-4,6v10h-4V12L6,6z" />
+          </vector>
+          EOF_SHAKE
+          mkdir -p "$(dirname 'app/src/main/java/com/venkat/shaketorch/BootReceiver.java')"
+          cat > 'app/src/main/java/com/venkat/shaketorch/BootReceiver.java' <<'EOF_SHAKE'
+          package com.venkat.shaketorch;
+
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+
+          /** Restarts the shake listener after the phone reboots, if it was switched on. */
+          public class BootReceiver extends BroadcastReceiver {
+              @Override
+              public void onReceive(Context context, Intent intent) {
+                  if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
+                  if (!Prefs.enabled(context)) return;
+                  context.startForegroundService(
+                          new Intent(context, ShakeService.class).setAction(ShakeService.ACTION_START));
+              }
+          }
+          EOF_SHAKE
+          mkdir -p "$(dirname 'app/src/main/java/com/venkat/shaketorch/MainActivity.java')"
+          cat > 'app/src/main/java/com/venkat/shaketorch/MainActivity.java' <<'EOF_SHAKE'
+          package com.venkat.shaketorch;
+
+          import android.Manifest;
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.graphics.Typeface;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.util.TypedValue;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.SeekBar;
+          import android.widget.Switch;
+          import android.widget.TextView;
+
+          /** Settings screen: turn the shake listener on/off and tune it. Built in code, no layout XML. */
+          public class MainActivity extends Activity {
+
+              private Switch enabledSwitch;
+              private TextView sensitivityLabel;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  if (Build.VERSION.SDK_INT >= 33
+                          && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                             != PackageManager.PERMISSION_GRANTED) {
+                      requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
+                  }
+
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  int pad = dp(20);
+                  root.setPadding(pad, dp(32), pad, pad);
+
+                  TextView title = new TextView(this);
+                  title.setText("Shake Torch");
+                  title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26);
+                  title.setTypeface(Typeface.DEFAULT_BOLD);
+                  root.addView(title);
+
+                  TextView sub = text("Shake your phone twice quickly (a short back-and-forth chop) "
+                          + "to turn the flashlight on. Shake again to turn it off.", 15);
+                  sub.setPadding(0, dp(6), 0, dp(20));
+                  root.addView(sub);
+
+                  // --- main switch
+                  enabledSwitch = new Switch(this);
+                  enabledSwitch.setText("Shake to toggle flashlight");
+                  enabledSwitch.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+                  enabledSwitch.setChecked(Prefs.enabled(this));
+                  enabledSwitch.setPadding(0, dp(8), 0, dp(8));
+                  enabledSwitch.setOnCheckedChangeListener((b, on) -> {
+                      Prefs.get(this).edit().putBoolean(Prefs.ENABLED, on).apply();
+                      if (on) startService(ShakeService.ACTION_START);
+                      else stopService(new Intent(this, ShakeService.class));
+                  });
+                  root.addView(enabledSwitch);
+
+                  // --- sensitivity
+                  sensitivityLabel = text("", 16);
+                  sensitivityLabel.setPadding(0, dp(20), 0, dp(4));
+                  root.addView(sensitivityLabel);
+                  SeekBar seek = new SeekBar(this);
+                  seek.setMax(100);
+                  seek.setProgress(Prefs.sensitivity(this));
+                  updateSensitivityLabel(seek.getProgress());
+                  seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                      @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                          updateSensitivityLabel(p);
+                      }
+                      @Override public void onStartTrackingTouch(SeekBar s) { }
+                      @Override public void onStopTrackingTouch(SeekBar s) {
+                          Prefs.get(MainActivity.this).edit().putInt(Prefs.SENSITIVITY, s.getProgress()).apply();
+                          reloadIfRunning();
+                      }
+                  });
+                  root.addView(seek);
+                  TextView hint = text("Move right if shakes are missed; left if it turns on by accident "
+                          + "(e.g. while walking).", 13);
+                  hint.setAlpha(0.7f);
+                  root.addView(hint);
+
+                  // --- screen off
+                  Switch screenOff = new Switch(this);
+                  screenOff.setText("Work when screen is off (uses a bit more battery)");
+                  screenOff.setChecked(Prefs.screenOff(this));
+                  screenOff.setPadding(0, dp(24), 0, dp(8));
+                  screenOff.setOnCheckedChangeListener((b, on) -> {
+                      Prefs.get(this).edit().putBoolean(Prefs.SCREEN_OFF, on).apply();
+                      reloadIfRunning();
+                  });
+                  root.addView(screenOff);
+
+                  // --- vibrate
+                  Switch vib = new Switch(this);
+                  vib.setText("Vibrate when the flashlight toggles");
+                  vib.setChecked(Prefs.vibrate(this));
+                  vib.setPadding(0, dp(8), 0, dp(8));
+                  vib.setOnCheckedChangeListener((b, on) ->
+                          Prefs.get(this).edit().putBoolean(Prefs.VIBRATE, on).apply());
+                  root.addView(vib);
+
+                  // --- buttons
+                  Button test = new Button(this);
+                  test.setText("Test: toggle flashlight now");
+                  test.setOnClickListener(v -> {
+                      if (!enabledSwitch.isChecked()) enabledSwitch.setChecked(true);
+                      startService(ShakeService.ACTION_TOGGLE);
+                  });
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                  lp.topMargin = dp(24);
+                  root.addView(test, lp);
+
+                  Button battery = new Button(this);
+                  battery.setText("Open battery settings for this app");
+                  battery.setOnClickListener(v -> startActivity(new Intent(
+                          Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                          Uri.parse("package:" + getPackageName()))));
+                  root.addView(battery);
+
+                  TextView tip = text("Samsung tip: in App info → Battery, choose \"Unrestricted\" so "
+                          + "One UI doesn't put Shake Torch to sleep.", 13);
+                  tip.setAlpha(0.7f);
+                  tip.setPadding(0, dp(8), 0, 0);
+                  root.addView(tip);
+
+                  ScrollView scroll = new ScrollView(this);
+                  scroll.setFitsSystemWindows(true);
+                  scroll.addView(root);
+                  setContentView(scroll);
+
+                  if (Prefs.enabled(this)) startService(ShakeService.ACTION_START);
+              }
+
+              private void startService(String action) {
+                  startForegroundService(new Intent(this, ShakeService.class).setAction(action));
+              }
+
+              private void reloadIfRunning() {
+                  if (Prefs.enabled(this)) startService(ShakeService.ACTION_RELOAD);
+              }
+
+              private void updateSensitivityLabel(int p) {
+                  String level = p < 34 ? "Hard shake" : p < 67 ? "Medium shake" : "Light shake";
+                  sensitivityLabel.setText("Sensitivity: " + level);
+              }
+
+              private TextView text(String s, int sp) {
+                  TextView t = new TextView(this);
+                  t.setText(s);
+                  t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+                  t.setGravity(Gravity.START);
+                  return t;
+              }
+
+              private int dp(int v) {
+                  return (int) TypedValue.applyDimension(
+                          TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
+              }
+          }
+          EOF_SHAKE
+          mkdir -p "$(dirname 'app/src/main/java/com/venkat/shaketorch/Prefs.java')"
+          cat > 'app/src/main/java/com/venkat/shaketorch/Prefs.java' <<'EOF_SHAKE'
+          package com.venkat.shaketorch;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+
+          /** Small wrapper around the app's saved settings. */
+          final class Prefs {
+              private static final String FILE = "shake_torch";
+              static final String ENABLED = "enabled";
+              static final String SENSITIVITY = "sensitivity";   // 0..100, higher = gentler shake needed
+              static final String SCREEN_OFF = "screen_off";     // keep listening while the screen is off
+              static final String VIBRATE = "vibrate";
+
+              private Prefs() {}
+
+              static SharedPreferences get(Context c) {
+                  return c.getSharedPreferences(FILE, Context.MODE_PRIVATE);
+              }
+
+              static boolean enabled(Context c)  { return get(c).getBoolean(ENABLED, false); }
+              static int sensitivity(Context c)  { return get(c).getInt(SENSITIVITY, 50); }
+              static boolean screenOff(Context c){ return get(c).getBoolean(SCREEN_OFF, true); }
+              static boolean vibrate(Context c)  { return get(c).getBoolean(VIBRATE, true); }
+
+              /** Maps the 0..100 slider to a g-force threshold: 0 -> 3.5g (hard shake), 100 -> 1.5g (light shake). */
+              static float thresholdG(Context c) {
+                  return 3.5f - (sensitivity(c) / 100f) * 2.0f;
+              }
+          }
+          EOF_SHAKE
+          mkdir -p "$(dirname 'app/src/main/java/com/venkat/shaketorch/ShakeService.java')"
+          cat > 'app/src/main/java/com/venkat/shaketorch/ShakeService.java' <<'EOF_SHAKE'
+          package com.venkat.shaketorch;
+
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.pm.ServiceInfo;
+          import android.hardware.Sensor;
+          import android.hardware.SensorEvent;
+          import android.hardware.SensorEventListener;
+          import android.hardware.SensorManager;
+          import android.hardware.camera2.CameraAccessException;
+          import android.hardware.camera2.CameraCharacteristics;
+          import android.hardware.camera2.CameraManager;
+          import android.os.Build;
+          import android.os.Handler;
+          import android.os.IBinder;
+          import android.os.Looper;
+          import android.os.PowerManager;
+          import android.os.SystemClock;
+          import android.os.VibrationEffect;
+          import android.os.Vibrator;
+          import android.os.VibratorManager;
+          import android.util.Log;
+
+          /**
+           * Foreground service that watches the accelerometer and toggles the flashlight
+           * when it detects a deliberate shake (two strong jolts within a short window).
+           */
+          public class ShakeService extends Service implements SensorEventListener {
+
+              static final String ACTION_START  = "com.venkat.shaketorch.START";
+              static final String ACTION_STOP   = "com.venkat.shaketorch.STOP";
+              static final String ACTION_TOGGLE = "com.venkat.shaketorch.TOGGLE";
+              static final String ACTION_RELOAD = "com.venkat.shaketorch.RELOAD";
+
+              private static final String TAG = "ShakeTorch";
+              private static final String CHANNEL_ID = "shake_torch";
+              private static final int NOTIF_ID = 1;
+
+              // Shake detection tuning
+              private static final long PEAK_GAP_MS   = 120;   // ignore readings from the same jolt
+              private static final long WINDOW_MS     = 800;   // jolts must happen within this window
+              private static final int  PEAKS_NEEDED  = 2;     // a back-and-forth shake
+              private static final long COOLDOWN_MS   = 1200;  // avoid toggling twice for one shake
+
+              private SensorManager sensorManager;
+              private Sensor accelerometer;
+              private CameraManager cameraManager;
+              private String torchCameraId;
+              private PowerManager.WakeLock wakeLock;
+
+              private volatile boolean torchOn = false;
+              private float thresholdG;
+              private boolean listening = false;
+
+              private long firstPeakAt = 0;
+              private long lastPeakAt = 0;
+              private int peakCount = 0;
+              private long lastToggleAt = 0;
+
+              private final CameraManager.TorchCallback torchCallback = new CameraManager.TorchCallback() {
+                  @Override
+                  public void onTorchModeChanged(String cameraId, boolean enabled) {
+                      if (cameraId.equals(torchCameraId)) {
+                          torchOn = enabled;   // stays in sync when the torch is switched from Quick Panel too
+                          updateNotification();
+                      }
+                  }
+              };
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+                  accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+                  cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+                  torchCameraId = findTorchCamera();
+                  cameraManager.registerTorchCallback(torchCallback, new Handler(Looper.getMainLooper()));
+                  createChannel();
+              }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  String action = intent != null ? intent.getAction() : ACTION_START;
+                  if (action == null) action = ACTION_START;
+
+                  // Must enter the foreground quickly on every start.
+                  goForeground();
+
+                  switch (action) {
+                      case ACTION_STOP:
+                          Prefs.get(this).edit().putBoolean(Prefs.ENABLED, false).apply();
+                          stopSelf();
+                          return START_NOT_STICKY;
+                      case ACTION_TOGGLE:
+                          toggleTorch();
+                          break;
+                      case ACTION_RELOAD:
+                      case ACTION_START:
+                      default:
+                          break;
+                  }
+                  applySettings();
+                  return START_STICKY;
+              }
+
+              private void applySettings() {
+                  thresholdG = Prefs.thresholdG(this);
+
+                  if (!listening && accelerometer != null) {
+                      // ~50 Hz, delivered immediately (no batching) so short shakes are not missed.
+                      sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
+                      listening = true;
+                  }
+
+                  boolean wantWake = Prefs.screenOff(this);
+                  if (wantWake && wakeLock == null) {
+                      PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                      wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ShakeTorch::listen");
+                      wakeLock.setReferenceCounted(false);
+                      wakeLock.acquire();
+                  } else if (!wantWake && wakeLock != null) {
+                      if (wakeLock.isHeld()) wakeLock.release();
+                      wakeLock = null;
+                  }
+                  updateNotification();
+              }
+
+              @Override
+              public void onSensorChanged(SensorEvent event) {
+                  float x = event.values[0], y = event.values[1], z = event.values[2];
+                  float g = (float) Math.sqrt(x * x + y * y + z * z) / SensorManager.GRAVITY_EARTH;
+                  if (g < thresholdG) return;
+
+                  long now = SystemClock.elapsedRealtime();
+                  if (now - lastPeakAt < PEAK_GAP_MS) return;          // same jolt, still ringing
+
+                  if (now - firstPeakAt > WINDOW_MS) {                 // start a new shake window
+                      firstPeakAt = now;
+                      peakCount = 0;
+                  }
+                  peakCount++;
+                  lastPeakAt = now;
+
+                  if (peakCount >= PEAKS_NEEDED && now - lastToggleAt > COOLDOWN_MS) {
+                      lastToggleAt = now;
+                      peakCount = 0;
+                      toggleTorch();
+                  }
+              }
+
+              @Override
+              public void onAccuracyChanged(Sensor sensor, int accuracy) { }
+
+              private void toggleTorch() {
+                  if (torchCameraId == null) return;
+                  try {
+                      cameraManager.setTorchMode(torchCameraId, !torchOn);
+                      if (Prefs.vibrate(this)) buzz();
+                  } catch (CameraAccessException | IllegalArgumentException e) {
+                      // e.g. the camera app is open and holding the flash
+                      Log.w(TAG, "Could not toggle torch", e);
+                  }
+              }
+
+              private String findTorchCamera() {
+                  try {
+                      String fallback = null;
+                      for (String id : cameraManager.getCameraIdList()) {
+                          CameraCharacteristics cc = cameraManager.getCameraCharacteristics(id);
+                          Boolean hasFlash = cc.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                          if (hasFlash == null || !hasFlash) continue;
+                          Integer facing = cc.get(CameraCharacteristics.LENS_FACING);
+                          if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) return id;
+                          if (fallback == null) fallback = id;
+                      }
+                      return fallback;
+                  } catch (CameraAccessException e) {
+                      Log.w(TAG, "No camera access", e);
+                      return null;
+                  }
+              }
+
+              private void buzz() {
+                  Vibrator v;
+                  if (Build.VERSION.SDK_INT >= 31) {
+                      VibratorManager vm = (VibratorManager) getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+                      v = vm.getDefaultVibrator();
+                  } else {
+                      v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+                  }
+                  if (v != null && v.hasVibrator()) {
+                      v.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE));
+                  }
+              }
+
+              // ---------- notification ----------
+
+              private void createChannel() {
+                  NotificationChannel ch = new NotificationChannel(
+                          CHANNEL_ID, "Shake listener", NotificationManager.IMPORTANCE_LOW);
+                  ch.setDescription("Shown while Shake Torch is listening for shakes");
+                  ch.setShowBadge(false);
+                  getSystemService(NotificationManager.class).createNotificationChannel(ch);
+              }
+
+              private Notification buildNotification() {
+                  PendingIntent open = PendingIntent.getActivity(this, 0,
+                          new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
+                  PendingIntent toggle = PendingIntent.getService(this, 1,
+                          new Intent(this, ShakeService.class).setAction(ACTION_TOGGLE),
+                          PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                  PendingIntent stop = PendingIntent.getService(this, 2,
+                          new Intent(this, ShakeService.class).setAction(ACTION_STOP),
+                          PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
+                  return new Notification.Builder(this, CHANNEL_ID)
+                          .setSmallIcon(R.drawable.ic_notif)
+                          .setContentTitle(torchOn ? "Flashlight ON" : "Shake to toggle flashlight")
+                          .setContentText("Shake the phone twice quickly")
+                          .setContentIntent(open)
+                          .setOngoing(true)
+                          .addAction(new Notification.Action.Builder(null,
+                                  torchOn ? "Turn off" : "Turn on", toggle).build())
+                          .addAction(new Notification.Action.Builder(null, "Stop", stop).build())
+                          .build();
+              }
+
+              private void goForeground() {
+                  Notification n = buildNotification();
+                  if (Build.VERSION.SDK_INT >= 34) {
+                      startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+                  } else {
+                      startForeground(NOTIF_ID, n);
+                  }
+              }
+
+              private void updateNotification() {
+                  getSystemService(NotificationManager.class).notify(NOTIF_ID, buildNotification());
+              }
+
+              @Override
+              public void onDestroy() {
+                  if (listening) sensorManager.unregisterListener(this);
+                  listening = false;
+                  cameraManager.unregisterTorchCallback(torchCallback);
+                  if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+                  wakeLock = null;
+                  super.onDestroy();
+              }
+
+              @Override
+              public IBinder onBind(Intent intent) { return null; }
+          }
+          EOF_SHAKE
+
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk ShakeTorch.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShakeTorch-apk
+          path: ShakeTorch.apk
